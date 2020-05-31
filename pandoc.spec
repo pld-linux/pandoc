@@ -1,3 +1,14 @@
+# TODO:
+# - ghc panics on ix86 when building with optimizations:
+# ghc: panic! (the 'impossible' happened)
+#   (GHC version 8.10.1:
+#        piResultTy
+#   [(Text, ParsecT [Tok] LaTeXState PandocPure Inlines)]
+#   Int
+#   Call stack:
+#       CallStack (from HasCallStack):
+#         callStackDoc, called at compiler/utils/Outputable.hs:1179:37 in ghc:Outputable
+#         pprPanic, called at compiler/types/Type.hs:1051:35 in ghc:Type
 #
 # Conditional build:
 %bcond_without	prof	# profiling library
@@ -355,11 +366,6 @@ Dokumentacja w formacie HTML dla pakietu ghc %{name}.
 %patch1 -p1
 
 %build
-# on ix86:
-# ghc: panic! (the 'impossible' happened)
-# (GHC version 8.10.1:
-#	piResultTy
-#  [(Text, ParsecT [Tok] LaTeXState PandocPure Inlines)]
 runhaskell Setup.hs configure -v2 \
 %ifarch %{ix86}
 	-O0 \

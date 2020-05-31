@@ -356,6 +356,9 @@ Dokumentacja w formacie HTML dla pakietu ghc %{name}.
 
 %build
 runhaskell Setup.hs configure -v2 \
+%ifarch %{ix86}
+	-O0 \
+%endif
 	%{?with_prof:--enable-library-profiling} \
 	--prefix=%{_prefix} \
 	--libdir=%{_libdir} \

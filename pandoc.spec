@@ -361,7 +361,7 @@ runhaskell Setup.hs configure -v2 \
 	--libdir=%{_libdir} \
 	--docdir=%{_docdir}/ghc-pandoc-%{version}
 
-runhaskell Setup.hs build %{?_smp_mflags}
+runhaskell Setup.hs build
 runhaskell Setup.hs haddock
 
 %install

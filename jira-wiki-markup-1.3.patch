@@ -1,0 +1,263 @@
+From 69a3fa57087f54df6fe24c447cfbad8563befd36 Mon Sep 17 00:00:00 2001
+From: Albert Krewinkel <albert@zeitkraut.de>
+Date: Mon, 30 Mar 2020 22:03:52 +0200
+Subject: [PATCH] Jira reader: retain image attributes
+
+Jira images attributes as in `!image.jpg|align=right!` are retained as
+key-value pairs. Thumbnail images, such as `!example.gif|thumbnail!`,
+are marked by a `thumbnail` class in their attributes.
+
+Related to #6234.
+---
+ src/Text/Pandoc/Readers/Jira.hs | 14 +++++++++++++-
+ test/Tests/Readers/Jira.hs      |  9 +++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/Text/Pandoc/Readers/Jira.hs b/src/Text/Pandoc/Readers/Jira.hs
+index 117239d409..cfe8ba81c1 100644
+--- a/src/Text/Pandoc/Readers/Jira.hs
++++ b/src/Text/Pandoc/Readers/Jira.hs
+@@ -123,7 +123,8 @@ jiraToPandocInlines = \case
+                                      fromInlines ils
+   Jira.Emoji icon        -> str . iconUnicode $ icon
+   Jira.Entity entity     -> str . fromEntity $ entity
+-  Jira.Image _ url       -> image (Jira.fromURL url)  "" mempty
++  Jira.Image params url  -> let (title, attr) = imgParams params
++                            in imageWith attr (Jira.fromURL url) title mempty
+   Jira.Link alias url    -> link (Jira.fromURL url) "" (fromInlines alias)
+   Jira.Linebreak         -> linebreak
+   Jira.Monospaced inlns  -> code . stringify . toList . fromInlines $ inlns
+@@ -145,6 +146,17 @@ jiraToPandocInlines = \case
+       Jira.Subscript   -> subscript
+       Jira.Superscript -> superscript
+ 
++    imgParams :: [Jira.Parameter] -> (Text, Attr)
++    imgParams = foldr addImgParam ("", ("", [], []))
++
++    addImgParam :: Jira.Parameter -> (Text, Attr) -> (Text, Attr)
++    addImgParam p (title, attr@(ident, classes, kvs)) =
++      case Jira.parameterKey p of
++        "title"     -> (Jira.parameterValue p, attr)
++        "thumbnail" -> (title, (ident, "thumbnail":classes, kvs))
++        _           -> let kv = (Jira.parameterKey p, Jira.parameterValue p)
++                       in (title, (ident, classes, kv:kvs))
++
+ -- | Get unicode representation of a Jira icon.
+ iconUnicode :: Jira.Icon -> Text
+ iconUnicode = \case
+diff --git a/test/Tests/Readers/Jira.hs b/test/Tests/Readers/Jira.hs
+index 299db7bed3..1ae3244ab4 100644
+--- a/test/Tests/Readers/Jira.hs
++++ b/test/Tests/Readers/Jira.hs
+@@ -117,6 +117,15 @@ tests =
+       "!https://example.com/image.jpg!" =?>
+       para (image "https://example.com/image.jpg" "" mempty)
+ 
++    , "thumbnail image" =:
++      "!image.jpg|thumbnail!" =?>
++      para (imageWith ("", ["thumbnail"], []) "image.jpg" "" mempty)
++
++    , "image with attributes" =:
++      "!image.gif|align=right, vspace=4, title=Hello!" =?>
++      let attr = ("", [], [("align", "right"), ("vspace", "4")])
++      in para $ imageWith attr "image.gif" "Hello" mempty
++
+     , "HTML entity" =:
+       "me &amp; you" =?> para "me & you"
+ 
+From c3f539364aea5065be1d6774cd62f40a1918e773 Mon Sep 17 00:00:00 2001
+From: Albert Krewinkel <albert@zeitkraut.de>
+Date: Sat, 4 Apr 2020 14:27:27 +0200
+Subject: [PATCH] Jira: support citations, attachment links, and user links
+
+Closes: #6231
+Closes: #6238
+Closes: #6239
+---
+ pandoc.cabal                    |  2 +-
+ src/Text/Pandoc/Readers/Jira.hs | 16 ++++++++++++++-
+ src/Text/Pandoc/Writers/Jira.hs | 28 ++++++++++++++++++++++---
+ stack.yaml                      |  2 +-
+ test/Tests/Readers/Jira.hs      | 36 ++++++++++++++++++++++++++++++---
+ test/Tests/Writers/Jira.hs      | 34 +++++++++++++++++++++++++++++++
+ 6 files changed, 109 insertions(+), 9 deletions(-)
+
+diff --git a/pandoc.cabal b/pandoc.cabal
+index 279cce80ab..529b3368f1 100644
+--- a/pandoc.cabal
++++ b/pandoc.cabal
+@@ -412,7 +412,7 @@ library
+                  blaze-html >= 0.9 && < 0.10,
+                  blaze-markup >= 0.8 && < 0.9,
+                  vector >= 0.10 && < 0.13,
+-                 jira-wiki-markup >= 1.1.3,
++                 jira-wiki-markup >= 1.3 && < 1.4,
+                  hslua >= 1.0.1,
+                  hslua-module-system >= 0.2 && < 0.3,
+                  hslua-module-text >= 0.2 && < 0.3,
+diff --git a/src/Text/Pandoc/Readers/Jira.hs b/src/Text/Pandoc/Readers/Jira.hs
+index d6fa688e33..46723f944a 100644
+--- a/src/Text/Pandoc/Readers/Jira.hs
++++ b/src/Text/Pandoc/Readers/Jira.hs
+@@ -119,13 +119,14 @@ jiraToPandocInlines :: Jira.Inline -> Inlines
+ jiraToPandocInlines = \case
+   Jira.Anchor t          -> spanWith (t, [], []) mempty
+   Jira.AutoLink url      -> link (Jira.fromURL url) "" (str (Jira.fromURL url))
++  Jira.Citation ils      -> str "—" <> space <> emph (fromInlines ils)
+   Jira.ColorInline c ils -> spanWith ("", [], [("color", colorName c)]) $
+                                      fromInlines ils
+   Jira.Emoji icon        -> str . iconUnicode $ icon
+   Jira.Entity entity     -> str . fromEntity $ entity
+   Jira.Image params url  -> let (title, attr) = imgParams params
+                             in imageWith attr (Jira.fromURL url) title mempty
+-  Jira.Link alias url    -> link (Jira.fromURL url) "" (fromInlines alias)
++  Jira.Link lt alias url -> jiraLinkToPandoc lt alias url
+   Jira.Linebreak         -> linebreak
+   Jira.Monospaced inlns  -> code . stringify . toList . fromInlines $ inlns
+   Jira.Space             -> space
+@@ -157,6 +158,19 @@ jiraToPandocInlines = \case
+         _           -> let kv = (Jira.parameterKey p, Jira.parameterValue p)
+                        in (title, (ident, classes, kv:kvs))
+ 
++-- | Convert a Jira link to pandoc inlines.
++jiraLinkToPandoc :: Jira.LinkType -> [Jira.Inline] -> Jira.URL -> Inlines
++jiraLinkToPandoc linkType alias url =
++  let url' = (if linkType == Jira.User then ("~" <>) else id) $ Jira.fromURL url
++      alias' = case alias of
++                 [] -> str url'
++                 _  -> foldMap jiraToPandocInlines alias
++  in case linkType of
++    Jira.External   -> link url' "" alias'
++    Jira.Email      -> link ("mailto:" <> url') "" alias'
++    Jira.Attachment -> linkWith ("", ["attachment"], []) url' "" alias'
++    Jira.User       -> linkWith ("", ["user-account"], []) url' "" alias'
++
+ -- | Get unicode representation of a Jira icon.
+ iconUnicode :: Jira.Icon -> Text
+ iconUnicode = \case
+diff --git a/src/Text/Pandoc/Writers/Jira.hs b/src/Text/Pandoc/Writers/Jira.hs
+index d1a6566875..19db341374 100644
+--- a/src/Text/Pandoc/Writers/Jira.hs
++++ b/src/Text/Pandoc/Writers/Jira.hs
+@@ -1,5 +1,6 @@
+ {-# LANGUAGE LambdaCase #-}
+ {-# LANGUAGE OverloadedStrings #-}
++{-# LANGUAGE PatternGuards #-}
+ {- |
+    Module      : Text.Pandoc.Writers.Jira
+    Copyright   : © 2010-2020 Albert Krewinkel, John MacFarlane
+@@ -25,7 +26,7 @@ import Text.Pandoc.Class.PandocMonad (PandocMonad)
+ import Text.Pandoc.Definition
+ import Text.Pandoc.Options (WriterOptions (writerTemplate, writerWrapText),
+                             WrapOption (..))
+-import Text.Pandoc.Shared (linesToPara)
++import Text.Pandoc.Shared (linesToPara, stringify)
+ import Text.Pandoc.Templates (renderTemplate)
+ import Text.Pandoc.Writers.Math (texMathToInlines)
+ import Text.Pandoc.Writers.Shared (defField, metaToContext)
+@@ -193,8 +194,7 @@ toJiraInlines inlines = do
+         Emph xs            -> styled Jira.Emphasis xs
+         Image attr _ tgt   -> imageToJira attr (fst tgt) (snd tgt)
+         LineBreak          -> pure . singleton $ Jira.Linebreak
+-        Link _ xs (tgt, _) -> singleton . flip Jira.Link (Jira.URL tgt)
+-                              <$> toJiraInlines xs
++        Link attr xs tgt   -> toJiraLink attr tgt xs
+         Math mtype cs      -> mathToJira mtype cs
+         Note bs            -> registerNotes bs
+         Quoted qt xs       -> quotedToJira qt xs
+@@ -242,6 +242,28 @@ imageToJira (_, classes, kvs) src title =
+                    else Jira.Parameter "title" title : imgParams
+   in pure . singleton $ Jira.Image imgParams' (Jira.URL src)
+ 
++-- | Creates a Jira Link element.
++toJiraLink :: PandocMonad m
++           => Attr
++           -> Target
++           -> [Inline]
++           -> JiraConverter m [Jira.Inline]
++toJiraLink (_, classes, _) (url, _) alias = do
++  let (linkType, url') = toLinkType url
++  description <- if url `elem` [stringify alias, "mailto:" <> stringify alias]
++                 then pure mempty
++                 else toJiraInlines alias
++  pure . singleton $ Jira.Link linkType description (Jira.URL url')
++ where
++  toLinkType url'
++    | Just email <- T.stripPrefix "mailto:" url' = (Jira.Email, email)
++    | "user-account" `elem` classes              = (Jira.User, dropTilde url)
++    | "attachment" `elem` classes                = (Jira.Attachment, url)
++    | otherwise                                  = (Jira.External, url)
++  dropTilde txt = case T.uncons txt of
++    Just ('~', username) -> username
++    _                    -> txt
++
+ mathToJira :: PandocMonad m
+            => MathType
+            -> Text
+diff --git a/stack.yaml b/stack.yaml
+index 4ff8c8e258..524bc945a5 100644
+--- a/stack.yaml
++++ b/stack.yaml
+@@ -20,7 +20,7 @@ extra-deps:
+ - regex-pcre-builtin-0.95.0.8.8.35
+ - doclayout-0.3
+ - emojis-0.1
+-- jira-wiki-markup-1.1.3
++- jira-wiki-markup-1.3.0
+ - HsYAML-0.2.0.0
+ - HsYAML-aeson-0.2.0.0
+ - doctemplates-0.8.1
+diff --git a/test/Tests/Readers/Jira.hs b/test/Tests/Readers/Jira.hs
+index 8e37968eb3..30f55585be 100644
+--- a/test/Tests/Readers/Jira.hs
++++ b/test/Tests/Readers/Jira.hs
+@@ -111,6 +111,10 @@ tests =
+       "HCO ~3~^-^" =?>
+       para ("HCO " <> subscript "3" <> superscript "-")
+ 
++    , "citation" =:
++      "Et tu, Brute? ??Caesar??" =?>
++      para ("Et tu, Brute? — " <> emph "Caesar")
++
+     , "color" =:
+       "This is {color:red}red{color}." =?>
+       para ("This is " <> spanWith ("", [], [("color", "red")]) "red" <> ".")
+@@ -123,9 +127,35 @@ tests =
+       "first\nsecond" =?>
+       para ("first" <> linebreak <> "second")
+ 
+-    , "link" =:
+-      "[Example|https://example.org]" =?>
+-      para (link "https://example.org" "" "Example")
++    , testGroup "links"
++      [ "external" =:
++        "[Example|https://example.org]" =?>
++        para (link "https://example.org" "" "Example")
++
++      , "email" =:
++        "[mailto:me@example.org]" =?>
++        para (link "mailto:me@example.org" "" "me@example.org")
++
++      , "email with description" =:
++        "[email|mailto:me@example.org]" =?>
++        para (link "mailto:me@example.org" "" "email")
++
++      , "attachment" =:
++        "[^example.txt]" =?>
++        para (linkWith ("", ["attachment"], []) "example.txt" "" "example.txt")
++
++      , "attachment with description" =:
++        "[an example^example.txt]" =?>
++        para (linkWith ("", ["attachment"], []) "example.txt" "" "an example")
++
++      , "user" =:
++        "[~johndoe]" =?>
++        para (linkWith ("", ["user-account"], []) "~johndoe" "" "~johndoe")
++
++      , "user with description" =:
++        "[John Doe|~johndoe]" =?>
++        para (linkWith ("", ["user-account"], []) "~johndoe" "" "John Doe")
++      ]
+ 
+     , "image" =:
+       "!https://example.com/image.jpg!" =?>

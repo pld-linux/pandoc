@@ -355,6 +355,11 @@ Dokumentacja w formacie HTML dla pakietu ghc %{name}.
 %patch1 -p1
 
 %build
+# on ix86:
+# ghc: panic! (the 'impossible' happened)
+# (GHC version 8.10.1:
+#	piResultTy
+#  [(Text, ParsecT [Tok] LaTeXState PandocPure Inlines)]
 runhaskell Setup.hs configure -v2 \
 %ifarch %{ix86}
 	-O0 \

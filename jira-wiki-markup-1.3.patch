@@ -157,7 +157,7 @@ index d1a6566875..19db341374 100644
  import Text.Pandoc.Writers.Shared (defField, metaToContext)
 @@ -193,8 +194,7 @@ toJiraInlines inlines = do
          Emph xs            -> styled Jira.Emphasis xs
-         Image attr _ tgt   -> imageToJira attr (fst tgt) (snd tgt)
+         Image _ _ (src, _) -> pure . singleton $ Jira.Image [] (Jira.URL src)
          LineBreak          -> pure . singleton $ Jira.Linebreak
 -        Link _ xs (tgt, _) -> singleton . flip Jira.Link (Jira.URL tgt)
 -                              <$> toJiraInlines xs
@@ -166,8 +166,8 @@ index d1a6566875..19db341374 100644
          Note bs            -> registerNotes bs
          Quoted qt xs       -> quotedToJira qt xs
 @@ -242,6 +242,28 @@ imageToJira (_, classes, kvs) src title =
-                    else Jira.Parameter "title" title : imgParams
-   in pure . singleton $ Jira.Image imgParams' (Jira.URL src)
+   Right xs -> xs
+   Left _  -> singleton $ Jira.Str t
  
 +-- | Creates a Jira Link element.
 +toJiraLink :: PandocMonad m

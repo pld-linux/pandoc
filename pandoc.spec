@@ -153,6 +153,8 @@ BuildRequires:	ghc-zlib-prof >= 0.5
 BuildRequires:	happy
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
+%define		_debugsource_packages	0
+
 %description
 Pandoc is a Haskell library for converting from one markup format to
 another, and a command-line tool that uses this library. It can read

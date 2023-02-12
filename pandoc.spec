@@ -17,7 +17,7 @@ Summary:	Conversion between markup formats
 Summary(pl.UTF-8):	Konwersja między różnymi formatami znaczników
 Name:		pandoc
 Version:	2.9.2.1
-Release:	2
+Release:	3
 License:	GPL v2+
 Group:		Applications/Publishing
 Source0:	https://github.com/jgm/pandoc/archive/%{version}/%{name}-%{version}.tar.gz
